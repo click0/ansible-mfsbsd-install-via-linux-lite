@@ -1,0 +1,6 @@
+---
+
+- name: Run the script {{ mil_script_name }}
+  ansible.builtin.shell:
+    cmd: "bash {{ mil_script_name }} {{ mil_script_options }} > /dev/null"
+  ignore_errors: true

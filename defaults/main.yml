@@ -1,0 +1,18 @@
+---
+
+mil_script_name: 'install_mfsbsd_iso.sh'
+mil_mfsbsd_type: 'standard'       # or mini or se
+mil_mfsbsd_version: '12.2'    # or 12
+mil_iface_list: '' # vtnet0 or em0
+mil_need_free_space: '' # '250'	# in megabytes!
+mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
+
+# yaml syntax:
+# https://yaml-multiline.info/
+mil_script_options: '
+ {{ mil_mfsbsd_type }}
+ {{ mil_mfsbsd_version }}
+ \"{{ mil_hostname }}\"
+ \"{{ mil_iface_list }}\"
+ \"{{ mil_need_free_space }}\"
+'

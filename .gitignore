@@ -1,0 +1,14 @@
+.DS_Store
+.idea
+build
+files
+tmp
+
+*~
+.*.swp
+*.bak
+
+*.iso
+*.img
+*.pub
+*.iml

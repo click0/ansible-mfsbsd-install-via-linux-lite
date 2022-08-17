@@ -1,0 +1,43 @@
+---
+
+- name: run apt-get update and install python via raw module
+  raw: "{{ item }}"
+  loop:
+    - apt-get update
+    - apt-get -y install python3-apt
+  ignore_errors: true
+
+- name: Ensure python3-apt is installed
+  command: >
+   apt-get install python3-apt -y -q
+   creates=/usr/share/doc/python-apt
+
+- name: Install gpg, ca-certificates, wget
+  apt:
+    name:
+      - gpg
+      - ca-certificates
+      - wget
+#      - tmux
+    update_cache: true
+
+#  - name: Check if tmux config file exists
+#    stat:
+#      path: /root/.tmux.conf
+#    register: stat_root_tmux_conf
+#
+#  - name: Add tmux option
+#    lineinfile:
+#      path: /root/.tmux.conf
+#      line: |
+#        set-option -g history-limit 300000
+#        unbind C-b
+#        set-option -g prefix C-a
+#        bind-key C-a send-prefix
+#        set-option -g mouse on
+#      state: present
+#      mode: 0644
+#      create: true
+#    when: not stat_root_tmux_conf.stat.exists
+
+## todo: Need add config

@@ -1,0 +1,24 @@
+---
+galaxy_info:
+  namespace: click0
+  role_name: mfsbsd_install_via_linux_lite
+  author: Vladislav V. Prodan
+  description: Installing MfsBSD for its subsequent boot and server reboot.
+  company: https://support.od.ua
+  github_branch: master
+  license: BSD
+  min_ansible_version: "2.11"
+  platforms:
+    - name: 'Ubuntu'
+      versions: ['all']
+    - name: 'Debian'
+      versions: ['all']
+  galaxy_tags:
+    - mfsbsd
+    - install
+    - debian
+    - ubuntu
+dependencies: []
+collections:
+  - community.general
+...

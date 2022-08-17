@@ -1,0 +1,14 @@
+---
+- name: Install the minimum required software for further work.
+  include: 0-pre-install.yml
+
+- name: Upload files
+  include: upload_files.yml
+
+- name: Install script
+  include: 1-install_mfsbsd_iso.yml
+
+- name: Reboot the server
+  reboot:
+     reboot_timeout: 3 ## it will still be an error
+  ignore_errors: true
