@@ -20,6 +20,7 @@ galaxy_info:
     - ubuntu
     - system
     - rescue
+    - grub
 dependencies: []
 collections:
   - community.general
