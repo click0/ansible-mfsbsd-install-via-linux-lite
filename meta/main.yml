@@ -18,6 +18,8 @@ galaxy_info:
     - install
     - debian
     - ubuntu
+    - system
+    - rescue
 dependencies: []
 collections:
   - community.general
