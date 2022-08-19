@@ -1,18 +1,20 @@
 ---
 
 mil_script_name: 'install_mfsbsd_iso.sh'
-mil_mfsbsd_type: 'standard' # or mini or se
-mil_mfsbsd_version: '12.2' # or 12
-mil_iface_list: '' # vtnet0 or em0
-mil_need_free_space: '' # '250'	# in megabytes!
+mil_mfsbsd_iso_url: '' # 'https://mfsbsd.vx.sk/files/iso/12/amd64/mfsbsd-12.2-RELEASE-amd64.iso'
+mil_mfsbsd_iso_hash: '' # '00eba73ac3a2940b533f2348da88d524'
+mil_mfsbsd_password: '' # default - 'mfsroot'
+mil_iface: '' # vtnet0 or em0, default in MfsBSD - ext1
+mil_need_free_space: '' # default '80'	# in megabytes!
 mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
 
 # yaml syntax:
 # https://yaml-multiline.info/
 mil_script_options: '
- {{ mil_mfsbsd_type }}
- {{ mil_mfsbsd_version }}
- \"{{ mil_hostname }}\"
- \"{{ mil_iface_list }}\"
- \"{{ mil_need_free_space }}\"
+ -m ''{{ mil_mfsbsd_iso_url }}''
+ -a ''{{ mil_mfsbsd_iso_hash }}''
+ -H ''{{ mil_hostname }}''
+ -p ''{{ mil_mfsbsd_password }}''
+ -i ''{{ mil_iface }}''
+ -s ''{{ mil_need_free_space }}''
 '
