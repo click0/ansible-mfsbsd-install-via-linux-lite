@@ -2,5 +2,5 @@
 - hosts: localhost
   remote_user: root
   roles:
-    - click0.mfsbsd-install-via-linux-lite
+    - click0.mfsbsd_install_via_linux_lite
 ...

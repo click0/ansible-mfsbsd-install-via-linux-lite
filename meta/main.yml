@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   namespace: click0
-  role_name: mfsbsd-install-via-linux-lite
+  role_name: mfsbsd_install_via_linux_lite
   author: Vladislav V. Prodan
   description: Installing MfsBSD for its subsequent boot and server reboot.
   company: https://support.od.ua

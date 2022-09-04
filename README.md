@@ -1,6 +1,6 @@
 # mfsbsd_install_via_linux_lite
 
-[Ansible Galaxy](https://galaxy.ansible.com/click0/mfsbsd-install-via-linux-lite/)
+[Ansible Galaxy](https://galaxy.ansible.com/click0/mfsbsd_install_via_linux_lite/)
 
 MfsBSD. Installing and booting MfsBSD from running Linux, via grub.
 Feel free to [share your feedback and report issues](https://github.com/click0/ansible-mfsbsd_install_via_linux_lite/issues).  
@@ -46,7 +46,7 @@ shell> cat install_mfsbsd_via_linux.yml
 #   mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
   
   roles:
-    - click0.mfsbsd-install-via-linux-lite
+    - click0.mfsbsd_install_via_linux_lite
 ```
 
 Commented options you may need.
@@ -68,7 +68,7 @@ None.
 
 ## Further use
 
-You may need [another role](https://galaxy.ansible.com/click0/freebsd-install-on-zfs-lite/) to install FreeBSD on the root with ZFS.
+You may need [another role](https://galaxy.ansible.com/click0/freebsd_install_on_zfs_lite/) to install FreeBSD on the root with ZFS.
 
 ### License
 
