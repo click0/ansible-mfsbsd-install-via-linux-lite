@@ -2,5 +2,5 @@
 - hosts: localhost
   remote_user: root
   roles:
-    - ansible-install-mfsbsd-via-linux
+    - click0.mfsbsd-install-via-linux-lite
 ...
