@@ -1,12 +1,12 @@
 ---
 - name: Install the minimum required software for further work.
-  include: 0-pre-install.yml
+  include_tasks: 0-pre-install.yml
 
 - name: Upload files
-  include: upload_files.yml
+  include_tasks: upload_files.yml
 
 - name: Install script
-  include: 1-install_mfsbsd_iso.yml
+  include_tasks: 1-install_mfsbsd_iso.yml
 
 - name: Reboot the server
   reboot:
