@@ -38,11 +38,11 @@ shell> cat install_mfsbsd_via_linux.yml
 - hosts: linux_server
   gather_facts: false
   vars:
-#   mil_mfsbsd_iso_url: '' # 'https://mfsbsd.vx.sk/files/iso/12/amd64/mfsbsd-12.2-RELEASE-amd64.iso'
-#   mil_mfsbsd_iso_hash: '' # '00eba73ac3a2940b533f2348da88d524'
+#   mil_mfsbsd_iso_url: '' # 'https://mfsbsd.vx.sk/files/iso/14/amd64/mfsbsd-14.0-RELEASE-amd64.iso'
+#   mil_mfsbsd_iso_hash: '' # 'bffaf11a441105b54823981416ae0166'
 #   mil_mfsbsd_password: '' # default - 'mfsroot'
 #   mil_iface: '' # vtnet0 or em0, default in MfsBSD - ext1
-#   mil_need_free_space: '' # default '80'	# in megabytes!
+#   mil_need_free_space: '' # default '99'	# in megabytes!
 #   mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
   
   roles:
