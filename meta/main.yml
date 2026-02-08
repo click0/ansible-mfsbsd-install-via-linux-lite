@@ -22,6 +22,4 @@ galaxy_info:
     - rescue
     - grub
 dependencies: []
-collections:
-  - community.general
 ...
