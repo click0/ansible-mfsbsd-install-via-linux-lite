@@ -1,0 +1,21 @@
+---
+namespace: click0
+name: mfsbsd_install_via_linux_lite
+version: 1.1.0
+description: Installing MfsBSD for its subsequent boot and server reboot.
+authors:
+  - Vladislav V. Prodan <github.com/click0>
+license:
+  - BSD-2-Clause
+repository: https://github.com/click0/ansible-mfsbsd-install-via-linux-lite
+documentation: https://github.com/click0/ansible-mfsbsd-install-via-linux-lite/blob/main/README.md
+issues: https://github.com/click0/ansible-mfsbsd-install-via-linux-lite/issues
+tags:
+  - mfsbsd
+  - install
+  - debian
+  - ubuntu
+  - system
+  - rescue
+  - grub
+...
