@@ -3,7 +3,7 @@
 # Copyright
 # Vladyslav V. Prodan <github.com/click0>
 # https://support.od.ua
-# 2018-2025
+# 2018-2026
 
 script_type="self-contained"
 # shellcheck disable=SC2034
