@@ -5,9 +5,9 @@ galaxy_info:
   author: Vladislav V. Prodan
   description: Installing MfsBSD for its subsequent boot and server reboot.
   company: https://support.od.ua
-  github_branch: master
+  github_branch: main
   license: BSD
-  min_ansible_version: '2.11'
+  min_ansible_version: '2.16'
   platforms:
     - name: 'Ubuntu'
       versions: ['all']
