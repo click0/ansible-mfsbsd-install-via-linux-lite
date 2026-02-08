@@ -40,6 +40,7 @@ network_settings() {
 		grep -Ev "^(10\.|127\.0\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)" | cut -d/ -f2 | head -1)
 
 	ip_default=$(ip route | grep default | awk '{print $3;}' | head -1)
+	ip_mask=${ip_mask:-"255.255.255.0"}
 	ip_mask_short=${ip_mask_short:-"24"}
 	[ "${ip_mask_short}" = "32" ] && ip_mask_short=22
 	ipv6_default=$(ip -6 route | grep default | awk '{print $3;}' | head -1)
