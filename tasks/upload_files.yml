@@ -1,10 +1,9 @@
 ---
 
 - name: Upload multiple files
-  with_items:
-    - '{{ mil_script_name }}'
-  copy:
+  ansible.builtin.copy:
     src: '{{ item }}'
     dest: /root/
     mode: '0644'
-    # (default) overwrite on source change
+  loop:
+    - '{{ mil_script_name }}'
