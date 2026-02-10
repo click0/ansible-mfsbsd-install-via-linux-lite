@@ -8,11 +8,15 @@ Feel free to [share your feedback and report issues](https://github.com/click0/a
 
 ## Synopsis
 
-This role acts as a runner for a single [`install_mfsbsd_iso.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/install_mfsbsd_iso.sh).  
-(That's why there is `lite` in the role name too)  
-This script to fetch [MfsBSD](https://mfsbsd.vx.sk) ISO to boot partition of Linux.  
-It also modifies the grub settings so that the machine can start MfsBSD on its own after a reboot.  
+This role acts as a runner for a single [`install_mfsbsd_iso.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/install_mfsbsd_iso.sh).
+(That's why there is `lite` in the role name too)
+This script to fetch [MfsBSD](https://mfsbsd.vx.sk) ISO to boot partition of Linux.
+It also modifies the grub settings so that the machine can start MfsBSD on its own after a reboot.
 The script itself determines the network settings of the machine and transfers them during the subsequent reboot.
+
+Both **Legacy BIOS** and **UEFI** boot modes are supported.
+The boot mode is auto-detected; use `mil_force_uefi: true` to force UEFI mode.
+On UEFI systems, the script uses the EFI System Partition (ESP) and can chainload FreeBSD's `loader.efi` if the GRUB `kfreebsd` module is unavailable.
 
 ## Variables
 
@@ -44,6 +48,7 @@ shell> cat install_mfsbsd_via_linux.yml
 #   mil_iface: '' # vtnet0 or em0, default in MfsBSD - ext1
 #   mil_need_free_space: '' # default '99'	# in megabytes!
 #   mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
+#   mil_force_uefi: false # force UEFI boot mode (auto-detected by default)
   
   roles:
     - click0.mfsbsd_install_via_linux_lite

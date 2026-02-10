@@ -7,6 +7,7 @@ mil_mfsbsd_password: '' # default - 'mfsroot'
 mil_iface: '' # vtnet0 or em0, default in MfsBSD - ext1
 mil_need_free_space: '' # default '99'	# in megabytes!
 mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
+mil_force_uefi: false # force UEFI boot mode (auto-detected by default)
 
 # Only pass non-empty options to the script.
 # Passing empty values (e.g. -m '' -a '') breaks the script.
@@ -17,3 +18,4 @@ mil_script_options: >-
   {% if mil_mfsbsd_password %} -p '{{ mil_mfsbsd_password }}'{% endif %}
   {% if mil_iface %} -i '{{ mil_iface }}'{% endif %}
   {% if mil_need_free_space %} -s '{{ mil_need_free_space }}'{% endif %}
+  {% if mil_force_uefi %} -U{% endif %}
