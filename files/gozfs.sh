@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 1.55
+# Current Version: 1.57
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -325,7 +325,7 @@ if [ "$boot_mode" = "uefi" ] || [ "$boot_mode" = "hybrid" ]; then
 	done
 fi
 
-if [ "${swap_partition_size}" ]; then
+if [ "${swap_partition_size}" ] && [ "${swap_partition_size}" != "0" ]; then
 	echo "Creating GPT swap partition with size ${swap_partition_size} on disks: "
 	for disk in $provider; do
 		get_disk_labelname
@@ -366,12 +366,12 @@ ls -l /dev/gpt/
 # Make first partition active so the BIOS boots from it
 # see https://forums.freebsd.org/threads/freebsd-gpt-uefi.42781/#post-238472
 
-if ! $(/sbin/kldstat -m zfs >/dev/null 2>/dev/null); then
-	/sbin/kldload zfs >/dev/null 2>/dev/null
+if ! /sbin/kldstat -m zfs >/dev/null 2>&1; then
+	/sbin/kldload zfs >/dev/null 2>&1
 	sysctl vfs.zfs.min_auto_ashift=13 # need module zfs
 fi
-if ! $(/sbin/kldstat -m g_nop >/dev/null 2>/dev/null); then
-	/sbin/kldload geom_nop.ko >/dev/null 2>/dev/null
+if ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
+	/sbin/kldload geom_nop.ko >/dev/null 2>&1
 fi
 
 # we need to create /boot/zfs so zpool.cache can be written.
@@ -484,7 +484,7 @@ cat <<EOF >$destdir/etc/fstab
 
 # Device		Mountpoint	FStype		Options	Dump	Pass#
 EOF
-if [ "$swap_partition_size" ]; then
+if [ "$swap_partition_size" ] && [ "$swap_partition_size" != "0" ]; then
 	echo "Adding swap partitions in fstab:"
 	for disk in $provider; do
 		get_disk_labelname
@@ -534,9 +534,8 @@ EOF
 # apply DNS settings
 [ -n "$nameserver" ] && {
 	cat <<EOF >$destdir/etc/resolvconf.conf
-	nameserver $nameserver
-	nameserver "$nameserver"
-	resolv_conf_local_only="NO"
+nameserver $nameserver
+resolv_conf_local_only="NO"
 EOF
 	resolvconf -u
 }
@@ -581,26 +580,26 @@ chmod 700 ${root_dir}
 # ${ssh_key_dir}/key[1..9].pub
 if [ -n "${ssh_key_dir}" ]; then
 	for url in ${ssh_key_dir}; do
-		if (ping -q -c3 $(echo $url | awk -F/ '{print $3;}') >/dev/null 2>&1); then
+		if (ping -q -c3 "$(echo "$url" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
 			for i in $(seq 1 9); do
-				fetch -qo - $url/key$i.pub >>${root_dir}/authorized_keys
+				fetch -qo - "$url/key$i.pub" >>"${root_dir}/authorized_keys"
 			done
-			chmod 600 ${root_dir}/authorized_keys
+			chmod 600 "${root_dir}/authorized_keys"
 			break
 		else
-			echo "no ping to host $(echo $url | awk -F/ '{print $3;}')"
+			echo "no ping to host $(echo "$url" | awk -F/ '{print $3;}')"
 		fi
 	done
 fi
 
 if [ -n "${ssh_key_file}" ]; then
 	for ssh_key in ${ssh_key_file}; do
-		if (ping -q -c3 $(echo ${ssh_key} | awk -F/ '{print $3;}') >/dev/null 2>&1); then
-			fetch -qo - ${ssh_key} >>${root_dir}/authorized_keys
-			chmod 600 ${root_dir}/authorized_keys
+		if (ping -q -c3 "$(echo "${ssh_key}" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
+			fetch -qo - "${ssh_key}" >>"${root_dir}/authorized_keys"
+			chmod 600 "${root_dir}/authorized_keys"
 			break
 		else
-			echo "no ping to host $(echo ${ssh_key} | awk -F/ '{print $3;}')"
+			echo "no ping to host $(echo "${ssh_key}" | awk -F/ '{print $3;}')"
 		fi
 	done
 fi
@@ -686,7 +685,10 @@ zfs set mountpoint=legacy $poolname
 zfs set mountpoint=/tmp $poolname/tmp
 zfs set mountpoint=/usr $poolname/usr
 zfs set mountpoint=/var $poolname/var
-swapoff /dev/gpt/swap-${label}
+for disk in $provider; do
+	get_disk_labelname
+	swapoff /dev/gpt/swap-${label} 2>/dev/null || true
+done
 
 echo zpool status:
 zpool status
