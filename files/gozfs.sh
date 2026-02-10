@@ -534,7 +534,7 @@ EOF
 # apply DNS settings
 [ -n "$nameserver" ] && {
 	cat <<EOF >$destdir/etc/resolvconf.conf
-nameserver $nameserver
+name_servers="$nameserver"
 resolv_conf_local_only="NO"
 EOF
 	resolvconf -u
@@ -581,7 +581,7 @@ chmod 700 ${root_dir}
 if [ -n "${ssh_key_dir}" ]; then
 	for url in ${ssh_key_dir}; do
 		if (ping -q -c3 "$(echo "$url" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
-			for i in $(seq 1 9); do
+			for i in $(jot 9); do
 				fetch -qo - "$url/key$i.pub" >>"${root_dir}/authorized_keys"
 			done
 			chmod 600 "${root_dir}/authorized_keys"
@@ -687,7 +687,7 @@ zfs set mountpoint=/usr $poolname/usr
 zfs set mountpoint=/var $poolname/var
 for disk in $provider; do
 	get_disk_labelname
-	swapoff /dev/gpt/swap-${label} 2>/dev/null || true
+	swapoff /dev/gpt/swap-${label}
 done
 
 echo zpool status:
