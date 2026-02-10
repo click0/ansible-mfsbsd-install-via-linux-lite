@@ -516,7 +516,16 @@ detect_boot_mode
 if [ "${BOOT_MODE}" = "uefi" ]; then
 	find_esp_mount
 	detect_secure_boot
-	DIR_ISO="${ESP_DIR}/images"
+	# Check if ESP has enough free space for ISO, otherwise fall back to /boot/images
+	esp_free=$(df -m "${ESP_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')
+	if [ -n "${esp_free}" ] && [ "${esp_free}" -gt "${NEED_FREE_SPACE}" ]; then
+		DIR_ISO="${ESP_DIR}/images"
+		echo "Using ESP for ISO storage: ${DIR_ISO} (${esp_free}MB free)"
+	else
+		echo "WARNING: ESP has insufficient space (${esp_free:-unknown}MB free, need >${NEED_FREE_SPACE}MB)"
+		echo "Falling back to /boot/images/"
+		DIR_ISO="/boot/images"
+	fi
 fi
 
 FILENAME_ISO=${MFSBSDISO##*/}
