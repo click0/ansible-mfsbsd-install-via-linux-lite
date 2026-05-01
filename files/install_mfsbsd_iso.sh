@@ -7,7 +7,7 @@
 
 script_type="self-contained"
 # shellcheck disable=SC2034
-version_script="1.27"
+version_script="1.28"
 
 set -e
 
