@@ -7,7 +7,7 @@
 
 script_type="self-contained"
 # shellcheck disable=SC2034
-version_script="1.29"
+version_script="1.30"
 
 set -e
 
@@ -30,6 +30,8 @@ DIR_ISO=/boot/images
 GRUB_CONFIG=/etc/grub.d/40_custom
 BOOT_MODE=""
 FORCE_UEFI=0
+FORCE_DHCP=0
+FORCE_STATIC=0
 DNS_SERVERS_V4="8.8.8.8 1.1.1.1"
 DNS_SERVERS_V6="2001:4860:4860::8888 2606:4700:4700::1111"
 # url2=http://otrada.od.ua/FreeBSD/LiveCD/mfsbsd
@@ -253,7 +255,8 @@ extract_boot_files() {
 # Emit mfsbsd network configuration to a destination file.
 # Usage: emit_mfsbsd_net <output_file> <line_prefix>
 #   <line_prefix> = "\tset kFreeBSD." for GRUB env, "" for loader.conf
-# Reads globals: ip, ip_mask_short, ip_default, ipv6, ipv6_default,
+# Reads globals: ip, ip_mask_short, ip_default, ip_mode,
+#                ipv6, ipv6_prefix, ipv6_default, ipv6_mode,
 #                iface_mac, HOSTNAME, PASSWORD, DNS_SERVERS_V4, DNS_SERVERS_V6
 emit_mfsbsd_net() {
 	_out="$1"
@@ -271,7 +274,8 @@ emit_mfsbsd_net() {
 		printf '%smfsbsd.interfaces="ext1"\n' "${_p}" >>"${_out}"
 	fi
 
-	if [ "$ip" = "127.0.0.1" ]; then
+	# IPv4: dhcp or static (mode is decided in network_settings)
+	if [ "${ip_mode}" = "dhcp" ]; then
 		printf '%smfsbsd.autodhcp="YES"\n' "${_p}" >>"${_out}"
 	else
 		# /32 host mask = point-to-point (e.g. Hetzner-style where the
@@ -286,14 +290,29 @@ emit_mfsbsd_net() {
 		printf '%smfsbsd.ifconfig_ext1="%s"\n' "${_p}" "${ifcfg}" >>"${_out}"
 		[ -n "${ip_default}" ] && \
 			printf '%smfsbsd.defaultrouter="%s"\n' "${_p}" "${ip_default}" >>"${_out}"
-		printf '%smfsbsd.nameservers="%s"\n' "${_p}" "${DNS_SERVERS_V4}" >>"${_out}"
 	fi
 
-	# IPv6 (independent of IPv4 path; overrides nameservers if present)
-	if [ -n "$ipv6" ] && [ "$ipv6" != "::1" ] && [ -n "${ipv6_default}" ]; then
-		printf '%smfsbsd.ifconfig_ext1_ipv6="inet6 %s"\n' "${_p}" "${ipv6}" >>"${_out}"
-		printf '%smfsbsd.ipv6_defaultrouter="%s"\n' "${_p}" "${ipv6_default}" >>"${_out}"
+	# IPv6: slaac, static, or none
+	case "${ipv6_mode}" in
+	slaac)
+		printf '%smfsbsd.ifconfig_ext1_ipv6="inet6 accept_rtadv"\n' "${_p}" >>"${_out}"
+		printf '%smfsbsd.rtsold_enable="YES"\n' "${_p}" >>"${_out}"
+		printf '%smfsbsd.ipv6_activate_all_interfaces="YES"\n' "${_p}" >>"${_out}"
+		;;
+	static)
+		if [ -n "${ipv6}" ] && [ "${ipv6}" != "::1" ]; then
+			printf '%smfsbsd.ifconfig_ext1_ipv6="inet6 %s/%s"\n' "${_p}" "${ipv6}" "${ipv6_prefix}" >>"${_out}"
+			[ -n "${ipv6_default}" ] && \
+				printf '%smfsbsd.ipv6_defaultrouter="%s"\n' "${_p}" "${ipv6_default}" >>"${_out}"
+		fi
+		;;
+	esac
+
+	# DNS — append IPv6 servers if IPv6 is configured at all
+	if [ "${ipv6_mode}" != "none" ]; then
 		printf '%smfsbsd.nameservers="%s %s"\n' "${_p}" "${DNS_SERVERS_V4}" "${DNS_SERVERS_V6}" >>"${_out}"
+	else
+		printf '%smfsbsd.nameservers="%s"\n' "${_p}" "${DNS_SERVERS_V4}" >>"${_out}"
 	fi
 
 	[ -n "${PASSWORD}" ] && \
@@ -419,53 +438,93 @@ network_settings() {
 	fi
 	[ -z "${net_iface}" ] && exit_error "Cannot determine network interface"
 
-	# 2. Read IPv4/mask/MAC from the chosen interface only.
+	# 2. IPv4 address / mask / gateway from chosen interface only
 	ip=$(ip -4 -o addr show dev "${net_iface}" scope global \
 		| awk '{print $4}' | cut -d/ -f1 | head -1)
 	ip=${ip:-"127.0.0.1"}
 	ip_mask_short=$(ip -4 -o addr show dev "${net_iface}" scope global \
 		| awk '{print $4}' | cut -d/ -f2 | head -1)
 	ip_mask_short=${ip_mask_short:-"24"}
-
-	# 3. IPv6 from the same interface
-	ipv6=$(ip -6 -o addr show dev "${net_iface}" scope global \
-		| awk '{print $4}' | cut -d/ -f1 | head -1)
-	ipv6=${ipv6:-"::1"}
-
-	# 4. Default routes (prefer the one on the chosen interface)
 	ip_default=$(ip -4 route show default dev "${net_iface}" 2>/dev/null \
 		| awk '{print $3; exit}')
 	[ -z "${ip_default}" ] && ip_default=$(ip -4 route show default 2>/dev/null \
 		| awk '{print $3; exit}')
-	ipv6_default=$(ip -6 route show default 2>/dev/null \
-		| awk '{print $3; exit}')
 
-	# 5. MAC of the chosen interface (used for ifconfig_ext1_mac in mfsbsd)
+	# 3. IPv4 mode auto-detect (DHCP vs static)
+	ip_mode="static"
+	if ip -4 -o addr show dev "${net_iface}" 2>/dev/null | grep -q 'dynamic'; then
+		ip_mode="dhcp"
+	elif ip -4 route show default dev "${net_iface}" 2>/dev/null | grep -q 'proto dhcp'; then
+		ip_mode="dhcp"
+	fi
+	[ "${FORCE_DHCP}" = "1" ] && ip_mode="dhcp"
+	[ "${FORCE_STATIC}" = "1" ] && ip_mode="static"
+
+	# 4. IPv6 address (preserve prefix length!) + gateway
+	ipv6_full=$(ip -6 -o addr show dev "${net_iface}" scope global \
+		| awk '{print $4}' | head -1)
+	ipv6=${ipv6_full%%/*}
+	ipv6=${ipv6:-"::1"}
+	if [ -n "${ipv6_full}" ] && [ "${ipv6_full}" != "${ipv6_full##*/}" ]; then
+		ipv6_prefix=${ipv6_full##*/}
+	else
+		ipv6_prefix="64"
+	fi
+
+	ipv6_default=$(ip -6 route show default dev "${net_iface}" 2>/dev/null \
+		| awk '{print $3; exit}')
+	[ -z "${ipv6_default}" ] && ipv6_default=$(ip -6 route show default 2>/dev/null \
+		| awk '{print $3; exit}')
+	# Link-local gateway must carry scope ID in FreeBSD (e.g. fe80::1%ext1)
+	case "${ipv6_default}" in
+	fe80:*)
+		ipv6_default="${ipv6_default}%ext1"
+		;;
+	esac
+
+	# 5. IPv6 mode auto-detect (SLAAC vs static)
+	ipv6_mode="none"
+	if [ -n "${ipv6_full}" ] && [ "${ipv6}" != "::1" ]; then
+		ipv6_mode="static"
+		if ip -6 -o addr show dev "${net_iface}" 2>/dev/null \
+			| grep -qE 'dynamic|mngtmpaddr|noprefixroute'; then
+			ipv6_mode="slaac"
+		elif ip -6 route show default dev "${net_iface}" 2>/dev/null | grep -q 'proto ra'; then
+			ipv6_mode="slaac"
+		fi
+		[ "${FORCE_DHCP}" = "1" ] && ipv6_mode="slaac"
+		[ "${FORCE_STATIC}" = "1" ] && ipv6_mode="static"
+	fi
+
+	# 6. MAC of the chosen interface (used for ifconfig_ext1_mac in mfsbsd)
 	iface_mac=$(ip -o link show dev "${net_iface}" \
 		| awk -F'link/ether ' '/link\/ether/{print $2}' | awk '{print $1}')
 	[ -z "${iface_mac}" ] && exit_error "Cannot determine MAC of ${net_iface}"
 
-	# 6. Sanity warnings
-	case "${ip}" in
-	10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
-		cat >&2 <<__WARN__
-NOTE: detected RFC1918 (private) address ${ip} on ${net_iface}.
-Mfsbsd will be configured with static IP ${ip}/${ip_mask_short} via gw ${ip_default}.
-Make sure this network is reachable from your console / management host
-(otherwise the rescue OS will be unreachable after reboot).
-__WARN__
-		;;
-	127.0.0.1)
+	# 7. Sanity warnings
+	if [ "$ip" = "127.0.0.1" ] && [ "${ip_mode}" != "dhcp" ]; then
 		cat >&2 <<__WARN__
 WARNING: no global IPv4 found on ${net_iface}.
 Mfsbsd will fall back to DHCP. If your network has no DHCP server,
 you will lose connectivity. Press Ctrl+C now to abort (10s).
 __WARN__
 		sleep 10
+		ip_mode="dhcp"
+	fi
+
+	case "${ip}" in
+	10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+		if [ "${ip_mode}" = "static" ]; then
+			cat >&2 <<__WARN__
+NOTE: detected RFC1918 (private) address ${ip} on ${net_iface}.
+Mfsbsd will be configured with static IP ${ip}/${ip_mask_short} via gw ${ip_default}.
+Make sure this network is reachable from your console / management host.
+__WARN__
+		fi
 		;;
 	esac
 
-	if [ -z "${ip_default}" ] && [ "${ip}" != "127.0.0.1" ]; then
+	if [ -z "${ip_default}" ] && [ "${ip_mode}" = "static" ]; then
 		echo "WARNING: no default IPv4 route. Mfsbsd will boot without a gateway." >&2
 	fi
 
@@ -493,9 +552,12 @@ check_free_space_boot() {
 
 usage() {
 	cat <<-EOF
-		Usage: $0 [-hUv] [-m url_iso -a md5_iso] [-H your_hostname] [-i network_iface] [-p 'myPassW0rD'] [-s need_free_space]
+		Usage: $0 [-DhSUv] [-m url_iso -a md5_iso] [-H your_hostname] [-i network_iface] [-p 'myPassW0rD'] [-s need_free_space]
 
 		  -a :  Md5 checksum rescue ISO
+		  -D :  Force DHCP/SLAAC for both IPv4 and IPv6 (override auto-detection).
+		        Useful when Linux uses static config but mfsbsd should DHCP
+		        (e.g. cloud images where DHCP is the canonical configuration).
 		  -h :  Show help
 		  -H :  Set the hostname of the host. The default value is 'YOURHOSTNAME'.
 		  -i :  Use a specific network interface to bind mfsbsd's "ext1" to.
@@ -508,6 +570,9 @@ usage() {
 		        By default, MfsBSD's password is 'mfsroot'.
 		  -s :  How much more do you need to check the availability of free disk space.
 		        Supported suffixes are 'M' for MiB (by default) and 'G' for GiB.
+		  -S :  Force static config for both IPv4 and IPv6 (override auto-detection).
+		        Useful when Linux DHCP-leased the address but you want mfsbsd
+		        to keep it pinned across the reboot.
 		  -U :  Force UEFI boot mode. By default, the boot mode is auto-detected.
 		        In UEFI mode, the script uses the EFI System Partition (ESP) and
 		        chainloads FreeBSD's loader.efi if GRUB kfreebsd module is unavailable.
@@ -516,14 +581,20 @@ usage() {
 	EOF
 }
 
-while getopts "a:hUvi:H:m:p:s:" flags; do
+while getopts "a:DhSUvi:H:m:p:s:" flags; do
 	case "${flags}" in
 	a)
 		ISO_HASH="${OPTARG}"
 		;;
+	D)
+		FORCE_DHCP=1
+		;;
 	h)
 		usage
 		exit 0
+		;;
+	S)
+		FORCE_STATIC=1
 		;;
 	U)
 		FORCE_UEFI=1
@@ -554,6 +625,10 @@ while getopts "a:hUvi:H:m:p:s:" flags; do
 	esac
 done
 shift "$((OPTIND-1))"
+
+if [ "${FORCE_DHCP}" = "1" ] && [ "${FORCE_STATIC}" = "1" ]; then
+	exit_error "-D and -S are mutually exclusive"
+fi
 
 # Detect boot mode (UEFI or BIOS)
 detect_boot_mode
@@ -620,15 +695,16 @@ fi
 network_settings
 
 echo "================ mfsbsd network config ================"
-echo "  interface : ${net_iface}"
-echo "  MAC       : ${iface_mac}"
-echo "  IPv4      : ${ip}/${ip_mask_short}"
-echo "  IPv4 gw   : ${ip_default:-<none>}"
-echo "  IPv6      : ${ipv6}"
-echo "  IPv6 gw   : ${ipv6_default:-<none>}"
-echo "  DHCP fb   : $([ "$ip" = "127.0.0.1" ] && echo YES || echo NO)"
-echo "  DNS v4    : ${DNS_SERVERS_V4}"
-echo "  DNS v6    : ${DNS_SERVERS_V6}"
+echo "  interface  : ${net_iface}"
+echo "  MAC        : ${iface_mac}"
+echo "  IPv4       : ${ip}/${ip_mask_short}"
+echo "  IPv4 gw    : ${ip_default:-<none>}"
+echo "  IPv4 mode  : ${ip_mode}"
+echo "  IPv6       : ${ipv6_full:-<none>}"
+echo "  IPv6 gw    : ${ipv6_default:-<none>}"
+echo "  IPv6 mode  : ${ipv6_mode}"
+echo "  DNS v4     : ${DNS_SERVERS_V4}"
+echo "  DNS v6     : ${DNS_SERVERS_V6}"
 echo "======================================================="
 
 # Remove previous MfsBSD entries if present
