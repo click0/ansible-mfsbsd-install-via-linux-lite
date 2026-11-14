@@ -4,3 +4,9 @@
   ansible.builtin.shell:
     cmd: "sh {{ mil_script_name }} {{ mil_script_options }}"
     chdir: /root/
+  register: mil_script_result
+  changed_when: true
+
+- name: Show what the script configured
+  ansible.builtin.debug:
+    msg: "{{ mil_script_result.stdout_lines | select('match', '^(Boot mode|  (interface|MAC|IPv4|IPv6)|GRUB )') | list }}"

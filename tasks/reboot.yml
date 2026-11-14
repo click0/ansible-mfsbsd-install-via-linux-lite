@@ -1,0 +1,25 @@
+---
+
+# MfsBSD has other host keys, another root password and no python, so the
+# reboot module cannot reconnect to it. Reboot detached and only wait for
+# sshd of MfsBSD from the controller.
+- name: Reboot the server into MfsBSD
+  ansible.builtin.shell: nohup sh -c 'sleep 3; reboot' >/dev/null 2>&1 &
+  changed_when: true
+
+# sshd of FreeBSD names the system in its banner ("SSH-2.0-OpenSSH_9.7 FreeBSD-..."),
+# sshd of the Linux being replaced does not. So this also notices a server
+# that came back into Linux instead of MfsBSD.
+- name: Wait for sshd of MfsBSD
+  when: mil_reboot_wait | bool
+  delegate_to: localhost
+  become: false
+  ansible.builtin.wait_for:
+    host: '{{ mil_reboot_wait_host or ansible_host | default(inventory_hostname) }}'
+    port: '{{ (mil_reboot_wait_port or ansible_port | default(22)) | int }}'
+    search_regex: FreeBSD
+    delay: 20
+    timeout: '{{ mil_reboot_timeout | int }}'
+    msg: >-
+      MfsBSD did not answer on ssh. Look at the console of the server:
+      it may still be in Linux, or MfsBSD came up with other network settings.

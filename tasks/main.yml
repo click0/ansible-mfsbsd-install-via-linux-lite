@@ -1,4 +1,11 @@
 ---
+- name: Check the role variables
+  ansible.builtin.assert:
+    that:
+      - mil_network_mode in ['', 'dhcp', 'static']
+    fail_msg: "mil_network_mode must be empty, 'dhcp' or 'static'"
+    quiet: true
+
 - name: Install the minimum required software for further work.
   include_tasks: 0-pre-install.yml
 
@@ -9,6 +16,4 @@
   include_tasks: 1-install_mfsbsd_iso.yml
 
 - name: Reboot the server
-  reboot:
-     reboot_timeout: 3 ## it will still be an error
-  ignore_errors: true
+  include_tasks: reboot.yml

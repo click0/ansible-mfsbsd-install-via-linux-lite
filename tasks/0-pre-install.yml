@@ -10,7 +10,7 @@
 - name: Ensure python3-apt is installed
   command: >
    apt-get install python3-apt -y -q
-   creates=/usr/share/doc/python-apt
+   creates=/usr/share/doc/python3-apt
 
 - name: Install gpg, ca-certificates, wget
   apt:

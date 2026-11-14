@@ -7,7 +7,7 @@
 
 script_type="self-contained"
 # shellcheck disable=SC2034
-version_script="1.30"
+version_script="1.31"
 
 set -e
 
@@ -123,49 +123,66 @@ find_esp_mount() {
 
 }
 
-get_grub_device() {
-	# Get GRUB device notation for a given directory
-	# Usage: get_grub_device /path
+grub_tool() {
+	# Print the path of a GRUB userland tool: grub-<name> or grub2-<name>
+	command -v "grub-$1" 2>/dev/null || command -v "grub2-$1" 2>/dev/null
+}
+
+grub_access_lines() {
+	# Print GRUB commands that make the filesystem holding directory $1
+	# the current GRUB root.
+	# Device names like (hd0,1) are not stable, and without device.map
+	# "grub-probe --target=drive" returns (hostdisk//dev/...), which GRUB
+	# does not understand at boot time. So the filesystem is found by UUID.
 	_dir="$1"
+	_probe=$(grub_tool probe) || exit_error "grub-probe not found"
+	_uuid=$("${_probe}" --target=fs_uuid "${_dir}") || exit_error "Cannot determine the filesystem UUID of ${_dir}"
+	for _m in $("${_probe}" --target=abstraction "${_dir}" 2>/dev/null); do
+		printf '\t\tinsmod %s\n' "${_m}"
+	done
+	for _m in $("${_probe}" --target=partmap "${_dir}" 2>/dev/null); do
+		printf '\t\tinsmod part_%s\n' "${_m}"
+	done
+	for _m in $("${_probe}" --target=fs "${_dir}" 2>/dev/null); do
+		printf '\t\tinsmod %s\n' "${_m}"
+	done
+	printf '\t\tsearch --no-floppy --fs-uuid --set=root %s\n' "${_uuid}"
+}
 
-	if command -v grub-probe >/dev/null 2>&1; then
-		grub-probe --target=drive "${_dir}" 2>/dev/null && return 0
-	elif command -v grub2-probe >/dev/null 2>&1; then
-		grub2-probe --target=drive "${_dir}" 2>/dev/null && return 0
-	fi
+grub_rel_path() {
+	# Print path $1 relative to the root of its filesystem
+	# (separate /boot, ESP, btrfs subvolume, ...)
+	_mkrelpath=$(grub_tool mkrelpath) || exit_error "grub-mkrelpath not found"
+	"${_mkrelpath}" "$1"
+}
 
-	# Fallback: detect manually
-	_dev=$(df "${_dir}" 2>/dev/null | awk 'NR==2 {print $1}')
-	if [ -z "${_dev}" ]; then
-		echo "(hd0,1)"
+make_fixed_relocator() {
+	# GRUB 2.06 built for i386-pc (BIOS) jumps to a wrong address when it
+	# starts a 64-bit kernel: relocator64.S emits "jmp *0(%rip)" followed by
+	# 8 bytes instead of 4, so "kfreebsd" resets the machine right after
+	# "Booting ...". Fixed upstream in GRUB 2.12; Debian 12 and Ubuntu 22.04
+	# ship 2.06.
+	# The installed GRUB is left alone: a corrected copy of relocator.mod
+	# (one byte: the displacement of that jump, 0 -> 4) is put next to the
+	# ISO and the menu entry loads it by path before "kfreebsd" would pull
+	# in the broken one.
+	# Usage: make_fixed_relocator /directory/for/the/copy
+	RELOCATOR_FIX=""
+	for _mod in /boot/grub/i386-pc/relocator.mod /boot/grub2/i386-pc/relocator.mod; do
+		[ -f "${_mod}" ] || continue
+		_off=$(od -An -v -tx1 "${_mod}" | tr -d ' \n' | awk '{
+			sig = "48ba0000000000000000fcff2500000000000000000000000000000000"
+			i = index($0, sig)
+			if (i > 0 && i % 2 == 1) print (i - 1) / 2 + 13
+		}')
+		[ -n "${_off}" ] || continue
+		cp "${_mod}" "$1/relocator.mod"
+		printf '\004' | dd of="$1/relocator.mod" bs=1 seek="${_off}" conv=notrunc 2>/dev/null
+		RELOCATOR_FIX="$1/relocator.mod"
+		echo "GRUB relocator bug found in ${_mod} (GRUB 2.06): using the corrected copy ${RELOCATOR_FIX}"
 		return 0
-	fi
-
-	# Extract disk and partition number
-	_disk=$(echo "${_dev}" | sed 's/[0-9]*$//' | sed 's/p$//')
-	_partnum=$(echo "${_dev}" | grep -o '[0-9]*$')
-	_partnum=${_partnum:-1}
-
-	# Determine partition scheme (GPT or MBR)
-	_diskbase=$(basename "${_disk}")
-	if [ -d "/sys/block/${_diskbase}" ]; then
-		_pttype=$(cat "/sys/block/${_diskbase}/device/../../../../../../../type" 2>/dev/null || true)
-	fi
-	# Check via blkid or gdisk
-	_scheme="msdos"
-	if command -v blkid >/dev/null 2>&1; then
-		_pt=$(blkid -o value -s PTTYPE "${_disk}" 2>/dev/null || true)
-		if [ "${_pt}" = "gpt" ]; then
-			_scheme="gpt"
-		fi
-	elif [ -e "/sys/block/${_diskbase}/$(basename "${_dev}")/partition" ]; then
-		if [ -d "/sys/firmware/efi" ]; then
-			_scheme="gpt"
-		fi
-	fi
-
-	echo "(hd0,${_scheme}${_partnum})"
-
+	done
+	return 0
 }
 
 check_kfreebsd_module() {
@@ -182,8 +199,9 @@ check_kfreebsd_module() {
 		/boot/grub/i386-pc \
 		/boot/grub2/i386-pc \
 		/usr/share/grub/i386-pc; do
-		if [ -f "${_grubdir}/kfreebsd.mod" ]; then
-			echo "Found kfreebsd module in ${_grubdir}"
+		# The "kfreebsd" command is provided by bsd.mod
+		if [ -f "${_grubdir}/bsd.mod" ]; then
+			echo "Found GRUB module bsd.mod (kfreebsd) in ${_grubdir}"
 			return 0
 		fi
 	done
@@ -252,31 +270,49 @@ extract_boot_files() {
 
 }
 
+emit_var() {
+	# Write one variable of the MfsBSD configuration.
+	# Usage: emit_var <name> <value>   (uses _out and _p of emit_mfsbsd_net)
+	if [ -n "${_p}" ]; then
+		# GRUB: inside single quotes everything is literal ($, ", \ ...);
+		# a single quote itself is written as '\''
+		printf "%s%s='%s'\n" "${_p}" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")" >>"${_out}"
+	else
+		# loader.conf: double quotes, \ and " are escaped
+		printf '%s="%s"\n' "$1" "$(printf '%s' "$2" | sed 's/[\\"]/\\&/g')" >>"${_out}"
+	fi
+}
+
 # Emit mfsbsd network configuration to a destination file.
 # Usage: emit_mfsbsd_net <output_file> <line_prefix>
-#   <line_prefix> = "\tset kFreeBSD." for GRUB env, "" for loader.conf
+#   <line_prefix> = "\t\tset kFreeBSD." for GRUB env, "" for loader.conf
 # Reads globals: ip, ip_mask_short, ip_default, ip_mode,
 #                ipv6, ipv6_prefix, ipv6_default, ipv6_mode,
 #                iface_mac, HOSTNAME, PASSWORD, DNS_SERVERS_V4, DNS_SERVERS_V6
+#
+# MfsBSD (/etc/rc.d/mfsbsd) reads only these variables: hostname,
+# mac_interfaces, ifconfig_<name>_mac, interfaces, ifconfig_<name>, autodhcp,
+# defaultrouter, static_routes, route_<name>, nameservers, rootpw, rootpwhash,
+# cloned_interfaces. It has nothing for IPv6: the IPv6 lines below are passed
+# to the kernel environment, but a stock MfsBSD image does not apply them.
 emit_mfsbsd_net() {
 	_out="$1"
 	_p="$2"
 
 	# hostname always
-	printf '%smfsbsd.hostname="%s"\n' "${_p}" "${HOSTNAME}" >>"${_out}"
+	emit_var mfsbsd.hostname "${HOSTNAME}"
 
 	# Bind logical "ext1" to a specific physical NIC by MAC.
 	# Without ifconfig_ext1_mac, mfsbsd binds to the first probed NIC,
 	# which is unreliable on multi-interface hosts.
 	if [ -n "${iface_mac}" ]; then
-		printf '%smfsbsd.mac_interfaces="ext1"\n' "${_p}" >>"${_out}"
-		printf '%smfsbsd.ifconfig_ext1_mac="%s"\n' "${_p}" "${iface_mac}" >>"${_out}"
-		printf '%smfsbsd.interfaces="ext1"\n' "${_p}" >>"${_out}"
+		emit_var mfsbsd.mac_interfaces "ext1"
+		emit_var mfsbsd.ifconfig_ext1_mac "${iface_mac}"
 	fi
 
 	# IPv4: dhcp or static (mode is decided in network_settings)
 	if [ "${ip_mode}" = "dhcp" ]; then
-		printf '%smfsbsd.autodhcp="YES"\n' "${_p}" >>"${_out}"
+		emit_var mfsbsd.autodhcp "YES"
 	else
 		# /32 host mask = point-to-point (e.g. Hetzner-style where the
 		# gateway lives outside the host's subnet). FreeBSD ifconfig
@@ -286,37 +322,47 @@ emit_mfsbsd_net() {
 		else
 			ifcfg="inet ${ip}/${ip_mask_short}"
 		fi
-		printf '%smfsbsd.autodhcp="NO"\n' "${_p}" >>"${_out}"
-		printf '%smfsbsd.ifconfig_ext1="%s"\n' "${_p}" "${ifcfg}" >>"${_out}"
-		[ -n "${ip_default}" ] && \
-			printf '%smfsbsd.defaultrouter="%s"\n' "${_p}" "${ip_default}" >>"${_out}"
+		emit_var mfsbsd.autodhcp "NO"
+		emit_var mfsbsd.ifconfig_ext1 "${ifcfg}"
+		if [ -n "${ip_default}" ]; then
+			emit_var mfsbsd.defaultrouter "${ip_default}"
+		fi
 	fi
 
-	# IPv6: slaac, static, or none
+	# IPv6: slaac, static, or none (see the note above: not applied by stock MfsBSD)
 	case "${ipv6_mode}" in
 	slaac)
-		printf '%smfsbsd.ifconfig_ext1_ipv6="inet6 accept_rtadv"\n' "${_p}" >>"${_out}"
-		printf '%smfsbsd.rtsold_enable="YES"\n' "${_p}" >>"${_out}"
-		printf '%smfsbsd.ipv6_activate_all_interfaces="YES"\n' "${_p}" >>"${_out}"
+		emit_var mfsbsd.ifconfig_ext1_ipv6 "inet6 accept_rtadv"
+		emit_var mfsbsd.rtsold_enable "YES"
+		emit_var mfsbsd.ipv6_activate_all_interfaces "YES"
 		;;
 	static)
 		if [ -n "${ipv6}" ] && [ "${ipv6}" != "::1" ]; then
-			printf '%smfsbsd.ifconfig_ext1_ipv6="inet6 %s/%s"\n' "${_p}" "${ipv6}" "${ipv6_prefix}" >>"${_out}"
-			[ -n "${ipv6_default}" ] && \
-				printf '%smfsbsd.ipv6_defaultrouter="%s"\n' "${_p}" "${ipv6_default}" >>"${_out}"
+			emit_var mfsbsd.ifconfig_ext1_ipv6 "inet6 ${ipv6}/${ipv6_prefix}"
+			if [ -n "${ipv6_default}" ]; then
+				emit_var mfsbsd.ipv6_defaultrouter "${ipv6_default}"
+			fi
 		fi
 		;;
 	esac
 
 	# DNS — append IPv6 servers if IPv6 is configured at all
 	if [ "${ipv6_mode}" != "none" ]; then
-		printf '%smfsbsd.nameservers="%s %s"\n' "${_p}" "${DNS_SERVERS_V4}" "${DNS_SERVERS_V6}" >>"${_out}"
+		emit_var mfsbsd.nameservers "${DNS_SERVERS_V4} ${DNS_SERVERS_V6}"
 	else
-		printf '%smfsbsd.nameservers="%s"\n' "${_p}" "${DNS_SERVERS_V4}" >>"${_out}"
+		emit_var mfsbsd.nameservers "${DNS_SERVERS_V4}"
 	fi
 
-	[ -n "${PASSWORD}" ] && \
-		printf '%smfsbsd.rootpw="%s"\n' "${_p}" "${PASSWORD}" >>"${_out}"
+	# MfsBSD started by GRUB on a UEFI machine reports machdep.bootmethod=BIOS
+	# (GRUB does not pass the EFI system table). Leave a hint for the
+	# installer (gozfs.sh reads it) so it does not install BIOS-only boot code.
+	if [ "${BOOT_MODE}" = "uefi" ]; then
+		emit_var mfsbsd.bootmethod "UEFI"
+	fi
+
+	if [ -n "${PASSWORD}" ]; then
+		emit_var mfsbsd.rootpw "${PASSWORD}"
+	fi
 }
 
 write_loader_conf() {
@@ -345,17 +391,24 @@ LOADEREOF
 
 write_grub_kfreebsd() {
 	# Write GRUB config using kfreebsd method (BIOS or UEFI with module)
-	_grub_dev="$1"
+	# Usage: write_grub_kfreebsd /path/to/iso
 
 	GRUB_TEMP=$(mktemp)
-	_grub_prefix=$(printf '\tset kFreeBSD.')
+	_grub_prefix=$(printf '\t\tset kFreeBSD.')
+	_iso_rel=$(grub_rel_path "$1")
 
 	cat << EOF >"${GRUB_TEMP}"
 ${MFSBSD_MARKER}
 
-	menuentry "${FILENAME_ISO}" {
-		set isofile=${DIR_ISO}/${FILENAME_ISO}
-		loopback loop ${_grub_dev}\$isofile
+	menuentry "${FILENAME_ISO}" --id mfsbsd {
+EOF
+	grub_access_lines "$(dirname "$1")" >>"${GRUB_TEMP}"
+	if [ -n "${RELOCATOR_FIX}" ]; then
+		printf '\t\tinsmod %s\n' "$(grub_rel_path "${RELOCATOR_FIX}")" >>"${GRUB_TEMP}"
+	fi
+	cat << EOF >>"${GRUB_TEMP}"
+		set isofile="${_iso_rel}"
+		loopback loop \$isofile
 		kfreebsd (loop)/boot/kernel/kernel.gz -v
 		# kfreebsd_loadenv (loop)/boot/device.hints
 		# kfreebsd_module (loop)/boot/kernel/geom_uzip.ko
@@ -364,17 +417,31 @@ ${MFSBSD_MARKER}
 		set kFreeBSD.vfs.root.mountfrom="ufs:/dev/md0"
 EOF
 
+	# Under UEFI, GRUB does not hand the EFI system table to the kernel, so
+	# the kernel cannot find the ACPI tables and panics ("running without
+	# device atpic requires a local APIC"). Tell it where the RSDP is.
+	if [ "${BOOT_MODE}" = "uefi" ] && [ -d /sys/firmware/efi ]; then
+		_rsdp=$(awk -F= '$1 == "ACPI20" { print $2; exit }' /sys/firmware/efi/systab 2>/dev/null || true)
+		if [ -z "${_rsdp}" ]; then
+			_rsdp=$(awk -F= '$1 == "ACPI" { print $2; exit }' /sys/firmware/efi/systab 2>/dev/null || true)
+		fi
+		if [ -z "${_rsdp}" ]; then
+			# newer kernels may not have systab; the boot log has the address too
+			_rsdp=$(dmesg 2>/dev/null | sed -n 's/.*ACPI: RSDP 0x0*\([0-9A-Fa-f][0-9A-Fa-f]*\).*/0x\1/p' | head -1)
+		fi
+		if [ -n "${_rsdp}" ]; then
+			printf '\t\tset kFreeBSD.acpi.rsdp="%s"\n' "${_rsdp}" >>"${GRUB_TEMP}"
+		else
+			echo "WARNING: ACPI RSDP address not found, MfsBSD may not boot" >&2
+		fi
+	fi
+
 	emit_mfsbsd_net "${GRUB_TEMP}" "${_grub_prefix}"
 
 	cat << EOF >>"${GRUB_TEMP}"
 	}
 
-EOF
-
-	menuentry=$(grep -c '^menuentry ' /boot/grub/grub.cfg 2>/dev/null || \
-		grep -c '^menuentry ' /boot/grub2/grub.cfg 2>/dev/null || echo "0")
-	cat << EOF >>"${GRUB_TEMP}"
-set default="$((menuentry + 1))"
+set default="mfsbsd"
 set timeout=1
 
 ${MFSBSD_MARKER_END}
@@ -388,6 +455,7 @@ EOF
 
 write_grub_chainload() {
 	# Write GRUB config using chainload method (UEFI without kfreebsd)
+	# Usage: write_grub_chainload /EFI/path/of/loader.efi   (relative to the ESP)
 	_efi_loader_path="$1"
 
 	GRUB_TEMP=$(mktemp)
@@ -395,19 +463,15 @@ write_grub_chainload() {
 	cat << EOF >"${GRUB_TEMP}"
 ${MFSBSD_MARKER}
 
-	menuentry "${FILENAME_ISO} (UEFI chainload)" {
-		insmod part_gpt
-		insmod fat
+	menuentry "${FILENAME_ISO} (UEFI chainload)" --id mfsbsd {
+EOF
+	grub_access_lines "${ESP_DIR}" >>"${GRUB_TEMP}"
+	cat << EOF >>"${GRUB_TEMP}"
 		insmod chain
 		chainloader ${_efi_loader_path}
 	}
 
-EOF
-
-	menuentry=$(grep -c '^menuentry ' /boot/grub/grub.cfg 2>/dev/null || \
-		grep -c '^menuentry ' /boot/grub2/grub.cfg 2>/dev/null || echo "0")
-	cat << EOF >>"${GRUB_TEMP}"
-set default="$((menuentry + 1))"
+set default="mfsbsd"
 set timeout=1
 
 ${MFSBSD_MARKER_END}
@@ -574,8 +638,10 @@ usage() {
 		        Useful when Linux DHCP-leased the address but you want mfsbsd
 		        to keep it pinned across the reboot.
 		  -U :  Force UEFI boot mode. By default, the boot mode is auto-detected.
-		        In UEFI mode, the script uses the EFI System Partition (ESP) and
-		        chainloads FreeBSD's loader.efi if GRUB kfreebsd module is unavailable.
+		        In UEFI mode the kernel is started by GRUB as well ("kfreebsd");
+		        Secure Boot must be off. If GRUB has no bsd module, the script
+		        falls back to chainloading loader.efi from the ESP, which needs
+		        an ISO that contains /boot/loader.efi (stock MfsBSD ISOs do not).
 		  -v :  Show version
 
 	EOF
@@ -630,27 +696,28 @@ if [ "${FORCE_DHCP}" = "1" ] && [ "${FORCE_STATIC}" = "1" ]; then
 	exit_error "-D and -S are mutually exclusive"
 fi
 
+# -s: megabytes by default, 'M' and 'G' suffixes are accepted
+case "${NEED_FREE_SPACE}" in
+*[Gg]) NEED_FREE_SPACE="${NEED_FREE_SPACE%[Gg]}"; _space_mult=1024 ;;
+*[Mm]) NEED_FREE_SPACE="${NEED_FREE_SPACE%[Mm]}"; _space_mult=1 ;;
+*) _space_mult=1 ;;
+esac
+case "${NEED_FREE_SPACE}" in
+'' | *[!0-9]*) exit_error "Invalid free space value for -s. Use a number with an optional M or G suffix." ;;
+esac
+NEED_FREE_SPACE=$((NEED_FREE_SPACE * _space_mult))
+
 # Detect boot mode (UEFI or BIOS)
 detect_boot_mode
 
-# Handle UEFI-specific setup
+# The ISO always goes to /boot/images: GRUB reads it from there in both
+# BIOS and UEFI mode ("loopback" + "kfreebsd"). The ESP is usually too small
+# for the ISO and is only needed for the chainload fallback.
 if [ "${BOOT_MODE}" = "uefi" ]; then
-	find_esp_mount
 	detect_secure_boot
-	# Check if ESP has enough free space for ISO, otherwise fall back to /boot/images
-	esp_free=$(df -m "${ESP_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')
-	if [ -n "${esp_free}" ] && [ "${esp_free}" -gt "${NEED_FREE_SPACE}" ]; then
-		DIR_ISO="${ESP_DIR}/images"
-		echo "Using ESP for ISO storage: ${DIR_ISO} (${esp_free}MB free)"
-	else
-		echo "WARNING: ESP has insufficient space (${esp_free:-unknown}MB free, need >${NEED_FREE_SPACE}MB)"
-		echo "Falling back to /boot/images/"
-		DIR_ISO="/boot/images"
-	fi
 fi
 
 FILENAME_ISO=${MFSBSDISO##*/}
-domain=$(echo "$MFSBSDISO" | awk -F/ '{print $3;}')
 
 case ${FILENAME_ISO} in
 # standard
@@ -675,11 +742,13 @@ mkdir -p "$DIR_ISO"
 cd "$DIR_ISO" || exit 1
 
 if [ ! -e "$FILENAME_ISO" ]; then
-	if (ping -q -c3 "$domain" >/dev/null 2>&1); then
-		wget --tries=3 --timeout=30 "$MFSBSDISO"
-	else
-		exit_error "Can't download Rescue ISO"
-	fi
+	# No ping probe here: ICMP is often filtered, and the host part of the URL
+	# may carry a port. A partial download must not be left behind either.
+	wget --tries=3 --timeout=30 -O "${FILENAME_ISO}.part" "$MFSBSDISO" || {
+		rm -f "${FILENAME_ISO}.part"
+		exit_error "Can't download Rescue ISO from ${MFSBSDISO}"
+	}
+	mv "${FILENAME_ISO}.part" "$FILENAME_ISO"
 fi
 
 [ ! -e "$FILENAME_ISO" ] && exit_error "ISO image not found"
@@ -706,6 +775,9 @@ echo "  IPv6 mode  : ${ipv6_mode}"
 echo "  DNS v4     : ${DNS_SERVERS_V4}"
 echo "  DNS v6     : ${DNS_SERVERS_V6}"
 echo "======================================================="
+if [ "${ipv6_mode}" != "none" ]; then
+	echo "NOTE: a stock MfsBSD image does not apply IPv6 settings, it will come up with IPv4 only."
+fi
 
 # Remove previous MfsBSD entries if present
 MFSBSD_MARKER="# --- BEGIN MFSBSD ---"
@@ -714,28 +786,28 @@ if grep -q "${MFSBSD_MARKER}" "${GRUB_CONFIG}" 2>/dev/null; then
 	sed -i "/${MFSBSD_MARKER}/,/${MFSBSD_MARKER_END}/d" "${GRUB_CONFIG}"
 fi
 
-# Detect GRUB device for the ISO directory
-GRUB_DEV=$(get_grub_device "$DIR_ISO")
-echo "GRUB device for ${DIR_ISO}: ${GRUB_DEV}"
 
+RELOCATOR_FIX=""
 if [ "${BOOT_MODE}" = "bios" ]; then
 	# Legacy BIOS: always use kfreebsd
-	write_grub_kfreebsd "${GRUB_DEV}"
+	make_fixed_relocator "${DIR_ISO}"
+	write_grub_kfreebsd "${DIR_ISO}/${FILENAME_ISO}"
 	echo "GRUB config written (kfreebsd, BIOS mode)"
 else
 	# UEFI mode: try kfreebsd first, fall back to chainload
 	if check_kfreebsd_module; then
 		echo "Using kfreebsd method for UEFI boot"
-		write_grub_kfreebsd "${GRUB_DEV}"
+		write_grub_kfreebsd "${DIR_ISO}/${FILENAME_ISO}"
 		echo "GRUB config written (kfreebsd, UEFI mode)"
 	else
 		echo "kfreebsd module not found, trying to install..."
 		if install_kfreebsd_module && check_kfreebsd_module; then
 			echo "Using kfreebsd method for UEFI boot (after install)"
-			write_grub_kfreebsd "${GRUB_DEV}"
+			write_grub_kfreebsd "${DIR_ISO}/${FILENAME_ISO}"
 			echo "GRUB config written (kfreebsd, UEFI mode)"
 		else
 			echo "kfreebsd unavailable, falling back to UEFI chainload method"
+			find_esp_mount
 			# Extract boot files from ISO to ESP
 			MFSBSD_EFI_DIR="${ESP_DIR}/mfsbsd"
 			rm -rf "${MFSBSD_EFI_DIR}"
