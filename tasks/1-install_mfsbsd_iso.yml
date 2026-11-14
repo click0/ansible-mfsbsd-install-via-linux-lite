@@ -9,4 +9,4 @@
 
 - name: Show what the script configured
   ansible.builtin.debug:
-    msg: "{{ mil_script_result.stdout_lines | select('match', '^(Boot mode|  (interface|MAC|IPv4|IPv6)|GRUB )') | list }}"
+    msg: "{{ mil_script_result.stdout_lines | select('match', '^(Boot mode|  (interface|FreeBSD if|MAC|IPv4|IPv6)|NOTE|GRUB |FreeBSD boot files|MfsBSD (will|is) )') | list }}"

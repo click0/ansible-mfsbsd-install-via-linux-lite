@@ -13,6 +13,8 @@ galaxy_info:
       versions: ['all']
     - name: 'Debian'
       versions: ['all']
+    - name: 'EL'
+      versions: ['9']
   galaxy_tags:
     - mfsbsd
     - install

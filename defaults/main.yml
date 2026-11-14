@@ -5,6 +5,7 @@ mil_mfsbsd_iso_url: '' # 'https://mfsbsd.vx.sk/files/iso/14/amd64/mfsbsd-14.0-RE
 mil_mfsbsd_iso_hash: '' # 'bffaf11a441105b54823981416ae0166'
 mil_mfsbsd_password: '' # default - 'mfsroot'
 mil_iface: '' # Linux interface to take the settings from (ens3, eth0); default - the one with the default route
+mil_bsd_iface: '' # FreeBSD name of that interface (em0, igb0, vtnet0); default - guessed from the Linux driver
 mil_need_free_space: '' # default '99'	# in megabytes! Suffixes M and G are accepted
 mil_hostname: 'mfsbsd-' # 'YOURHOSTNAME'
 mil_force_uefi: false # force UEFI boot mode (auto-detected by default)
@@ -24,6 +25,7 @@ mil_script_options: >-
   {% if mil_hostname %} -H {{ mil_hostname | string | quote }}{% endif %}
   {% if mil_mfsbsd_password %} -p {{ mil_mfsbsd_password | string | quote }}{% endif %}
   {% if mil_iface %} -i {{ mil_iface | string | quote }}{% endif %}
+  {% if mil_bsd_iface %} -I {{ mil_bsd_iface | string | quote }}{% endif %}
   {% if mil_need_free_space %} -s {{ mil_need_free_space | string | quote }}{% endif %}
   {% if mil_force_uefi %} -U{% endif %}
   {% if mil_network_mode == 'dhcp' %} -D{% elif mil_network_mode == 'static' %} -S{% endif %}
