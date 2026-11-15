@@ -210,7 +210,7 @@ so they need two inventory entries and two plays (or two runs):
 | System on the host | Linux | MfsBSD |
 | Login | your key or password | `root` and the MfsBSD password (needs `sshpass` on the control node) |
 | Host key | the known one | a new one |
-| Shell, Python | `sh`, `/usr/bin/python3` | `csh`, `/usr/local/bin/python3` (installed by that role) |
+| Shell, Python | `sh`, `/usr/bin/python3` | `csh` (set `ansible_shell_type = csh`), `/usr/local/bin/python3` (installed by that role) |
 
 The second role detects the boot mode by itself, including the case when MfsBSD was started by GRUB on a UEFI machine.
 
